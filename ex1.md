@@ -223,16 +223,16 @@ def init_db():
     cur.close()
     conn.close()
 
-@flask_app.route("/api/health", methods=["GET"])
+@flask_app.route("/health", methods=["GET"])
 def health():
     return jsonify({"status": "ok"})
 
-@flask_app.route("/api/init", methods=["POST"])
+@flask_app.route("/init", methods=["POST"])
 def create_table():
     init_db()
     return jsonify({"message": "users table created successfully"})
 
-@flask_app.route("/api/users", methods=["POST"])
+@flask_app.route("/users", methods=["POST"])
 def create_user():
     data = request.get_json()
 
@@ -260,7 +260,7 @@ def create_user():
         cur.close()
         conn.close()
 
-@flask_app.route("/api/users", methods=["GET"])
+@flask_app.route("/users", methods=["GET"])
 def get_users():
     conn = get_conn()
     cur = conn.cursor()
@@ -278,7 +278,7 @@ def get_users():
 
     return jsonify(users)
 
-@flask_app.route("/api/users/<int:user_id>", methods=["GET"])
+@flask_app.route("/users/<int:user_id>", methods=["GET"])
 def get_user(user_id):
     conn = get_conn()
     cur = conn.cursor()
@@ -294,7 +294,7 @@ def get_user(user_id):
 
     return jsonify({"id": row[0], "name": row[1], "email": row[2]})
 
-@flask_app.route("/api/users/<int:user_id>", methods=["PUT"])
+@flask_app.route("/users/<int:user_id>", methods=["PUT"])
 def update_user(user_id):
     data = request.get_json()
 
@@ -323,7 +323,7 @@ def update_user(user_id):
 
     return jsonify({"id": user_id, "name": name, "email": email})
 
-@flask_app.route("/api/users/<int:user_id>", methods=["DELETE"])
+@flask_app.route("/users/<int:user_id>", methods=["DELETE"])
 def delete_user(user_id):
     conn = get_conn()
     cur = conn.cursor()
@@ -376,19 +376,19 @@ func start
 Test:
 
 ```bash
-curl http://localhost:7071/api/health
+curl http://localhost:7071/health
 ```
 
 Create table:
 
 ```bash
-curl -X POST http://localhost:7071/api/init
+curl -X POST http://localhost:7071/init
 ```
 
 Create user:
 
 ```bash
-curl -X POST http://localhost:7071/api/users \
+curl -X POST http://localhost:7071/users \
   -H "Content-Type: application/json" \
   -d '{"name":"Abhi","email":"abhi@example.com"}'
 ```
@@ -396,7 +396,7 @@ curl -X POST http://localhost:7071/api/users \
 Get users:
 
 ```bash
-curl http://localhost:7071/api/users
+curl http://localhost:7071/users
 ```
 
 ---
@@ -463,19 +463,19 @@ APP_URL="https://$FUNC_APP.azurewebsites.net"
 Health:
 
 ```bash
-curl "$APP_URL/api/health"
+curl "$APP_URL/health"
 ```
 
 Create table:
 
 ```bash
-curl -X POST "$APP_URL/api/init"
+curl -X POST "$APP_URL/init"
 ```
 
 Create user:
 
 ```bash
-curl -X POST "$APP_URL/api/users" \
+curl -X POST "$APP_URL/users" \
   -H "Content-Type: application/json" \
   -d '{"name":"Abhi","email":"abhi@azure.com"}'
 ```
@@ -483,19 +483,19 @@ curl -X POST "$APP_URL/api/users" \
 Get users:
 
 ```bash
-curl "$APP_URL/api/users"
+curl "$APP_URL/users"
 ```
 
 Get one user:
 
 ```bash
-curl "$APP_URL/api/users/1"
+curl "$APP_URL/users/1"
 ```
 
 Update user:
 
 ```bash
-curl -X PUT "$APP_URL/api/users/1" \
+curl -X PUT "$APP_URL/users/1" \
   -H "Content-Type: application/json" \
   -d '{"name":"Abhinandan","email":"abhinandan@azure.com"}'
 ```
@@ -503,7 +503,7 @@ curl -X PUT "$APP_URL/api/users/1" \
 Delete user:
 
 ```bash
-curl -X DELETE "$APP_URL/api/users/1"
+curl -X DELETE "$APP_URL/users/1"
 ```
 
 ---
