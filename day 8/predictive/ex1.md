@@ -30,3 +30,16 @@ High Service Risk
 ```
 
 **Business action:** The service centre contacts the customer and schedules preventive maintenance before a breakdown occurs.
+
+
+| Mileage (km) | Engine alerts | Brake wear (%) | Service gap (months) | Service risk |
+| -----------: | ------------: | -------------: | -------------------: | ------------ |
+|       20,000 |             0 |             20 |                    3 | Low Risk     |
+|       28,000 |             1 |             30 |                    5 | Low Risk     |
+|       35,000 |             1 |             40 |                    6 | Low Risk     |
+|       45,000 |             2 |             50 |                    8 | Low Risk     |
+|       52,000 |             3 |             65 |                   10 | High Risk    |
+|       60,000 |             4 |             72 |                   12 | High Risk    |
+|       70,000 |             5 |             82 |                   14 | High Risk    |
+|       80,000 |             7 |             90 |                   18 | High Risk    |
+
