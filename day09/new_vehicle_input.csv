@@ -1,0 +1,4 @@
+vehicle_age_years,mileage_km,service_gap_months,engine_alerts,brake_wear_percent,avg_monthly_distance_km,warranty_claims,customer_complaints,repair_cost_last_year,battery_voltage,driving_pattern,fuel_type,region,transmission,service_center_type
+8.2,112000,18,6,84,1850,2,4,24500,Low,City,Diesel,West,Manual,Independent
+2.1,23000,4,0,24,820,0,0,1200,Normal,Highway,Petrol,South,Automatic,Authorized
+5.7,68000,11,3,61,1410,1,2,9800,Normal,Mixed,CNG,North,Manual,Authorized
