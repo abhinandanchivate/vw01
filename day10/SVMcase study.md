@@ -78,6 +78,346 @@ These rules are only used to create the sample dataset. In a real project, the t
 
 # 4. Complete Python Implementation
 
+```python
+# =========================================================
+# SVM CASE STUDY
+# Vehicle Service-Risk Classification
+# =========================================================
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import Pipeline
+from sklearn.svm import SVC
+
+from sklearn.metrics import (
+    accuracy_score,
+    confusion_matrix,
+    classification_report,
+    roc_auc_score,
+    RocCurveDisplay
+)
+
+
+# ---------------------------------------------------------
+# 1. CREATE SAMPLE DATASET
+# ---------------------------------------------------------
+
+np.random.seed(42)
+
+number_of_records = 1000
+
+data = pd.DataFrame({
+    "mileage_km": np.random.randint(
+        10000, 150000, number_of_records
+    ),
+
+    "service_gap_months": np.random.randint(
+        1, 25, number_of_records
+    ),
+
+    "engine_alerts": np.random.randint(
+        0, 9, number_of_records
+    ),
+
+    "brake_wear_percent": np.random.randint(
+        10, 100, number_of_records
+    ),
+
+    "battery_voltage": np.round(
+        np.random.uniform(9.5, 14.5, number_of_records),
+        1
+    ),
+
+    "customer_complaints": np.random.randint(
+        0, 8, number_of_records
+    ),
+
+    "vehicle_age_years": np.random.randint(
+        1, 16, number_of_records
+    )
+})
+
+
+# ---------------------------------------------------------
+# 2. CREATE RISK SCORE FOR SAMPLE TARGET
+# ---------------------------------------------------------
+
+risk_score = (
+    (data["mileage_km"] > 80000).astype(int) * 2
+    + (data["service_gap_months"] > 12).astype(int) * 2
+    + (data["engine_alerts"] >= 4).astype(int) * 2
+    + (data["brake_wear_percent"] > 70).astype(int) * 2
+    + (data["battery_voltage"] < 11.5).astype(int) * 2
+    + (data["customer_complaints"] >= 3).astype(int)
+    + (data["vehicle_age_years"] > 8).astype(int)
+)
+
+
+# Add a small amount of random variation
+risk_score = risk_score + np.random.normal(
+    0,
+    1,
+    number_of_records
+)
+
+
+data["service_risk"] = np.where(
+    risk_score >= 7,
+    "High Risk",
+    "Low Risk"
+)
+
+
+print("First five records:")
+print(data.head())
+
+print("\nTarget distribution:")
+print(data["service_risk"].value_counts())
+
+
+# ---------------------------------------------------------
+# 3. SEPARATE FEATURES AND TARGET
+# ---------------------------------------------------------
+
+X = data.drop("service_risk", axis=1)
+
+y = data["service_risk"]
+
+
+# ---------------------------------------------------------
+# 4. SPLIT TRAINING AND TEST DATA
+# ---------------------------------------------------------
+
+X_train, X_test, y_train, y_test = train_test_split(
+    X,
+    y,
+    test_size=0.20,
+    random_state=42,
+    stratify=y
+)
+
+
+print("\nTraining records:", len(X_train))
+print("Testing records:", len(X_test))
+
+
+# ---------------------------------------------------------
+# 5. CREATE SVM PIPELINE
+# ---------------------------------------------------------
+
+svm_pipeline = Pipeline(
+    steps=[
+        (
+            "scaler",
+            StandardScaler()
+        ),
+        (
+            "model",
+            SVC(
+                kernel="rbf",
+                C=1.0,
+                gamma="scale",
+                probability=True,
+                class_weight="balanced",
+                random_state=42
+            )
+        )
+    ]
+)
+
+
+# ---------------------------------------------------------
+# 6. TRAIN THE MODEL
+# ---------------------------------------------------------
+
+svm_pipeline.fit(
+    X_train,
+    y_train
+)
+
+
+# ---------------------------------------------------------
+# 7. MAKE PREDICTIONS
+# ---------------------------------------------------------
+
+predictions = svm_pipeline.predict(
+    X_test
+)
+
+probabilities = svm_pipeline.predict_proba(
+    X_test
+)
+
+
+# ---------------------------------------------------------
+# 8. MODEL EVALUATION
+# ---------------------------------------------------------
+
+accuracy = accuracy_score(
+    y_test,
+    predictions
+)
+
+confusion = confusion_matrix(
+    y_test,
+    predictions,
+    labels=["Low Risk", "High Risk"]
+)
+
+report = classification_report(
+    y_test,
+    predictions
+)
+
+
+print("\nModel Accuracy:")
+print(round(accuracy, 4))
+
+print("\nConfusion Matrix:")
+print(confusion)
+
+print("\nClassification Report:")
+print(report)
+
+
+# ---------------------------------------------------------
+# 9. CALCULATE ROC-AUC
+# ---------------------------------------------------------
+
+class_order = list(
+    svm_pipeline.named_steps["model"].classes_
+)
+
+high_risk_index = class_order.index(
+    "High Risk"
+)
+
+high_risk_probabilities = probabilities[
+    :,
+    high_risk_index
+]
+
+y_test_binary = y_test.map({
+    "Low Risk": 0,
+    "High Risk": 1
+})
+
+roc_auc = roc_auc_score(
+    y_test_binary,
+    high_risk_probabilities
+)
+
+print("\nROC-AUC Score:")
+print(round(roc_auc, 4))
+
+
+# ---------------------------------------------------------
+# 10. PREDICT NEW VEHICLES
+# ---------------------------------------------------------
+
+new_vehicles = pd.DataFrame({
+    "mileage_km": [
+        35000,
+        92000,
+        125000
+    ],
+
+    "service_gap_months": [
+        4,
+        15,
+        21
+    ],
+
+    "engine_alerts": [
+        0,
+        5,
+        7
+    ],
+
+    "brake_wear_percent": [
+        30,
+        78,
+        92
+    ],
+
+    "battery_voltage": [
+        13.2,
+        11.0,
+        10.2
+    ],
+
+    "customer_complaints": [
+        0,
+        3,
+        6
+    ],
+
+    "vehicle_age_years": [
+        2,
+        9,
+        13
+    ]
+})
+
+
+new_predictions = svm_pipeline.predict(
+    new_vehicles
+)
+
+new_probabilities = svm_pipeline.predict_proba(
+    new_vehicles
+)
+
+
+prediction_result = new_vehicles.copy()
+
+prediction_result["predicted_service_risk"] = (
+    new_predictions
+)
+
+prediction_result["high_risk_probability"] = (
+    new_probabilities[:, high_risk_index]
+    .round(4)
+)
+
+
+print("\nNew Vehicle Predictions:")
+print(
+    prediction_result.to_string(index=False)
+)
+
+
+# ---------------------------------------------------------
+# 11. SAVE OUTPUT
+# ---------------------------------------------------------
+
+prediction_result.to_csv(
+    "vehicle_service_risk_predictions.csv",
+    index=False
+)
+
+print(
+    "\nPredictions saved to "
+    "vehicle_service_risk_predictions.csv"
+)
+
+
+# ---------------------------------------------------------
+# 12. DISPLAY ROC CURVE
+# ---------------------------------------------------------
+
+RocCurveDisplay.from_predictions(
+    y_test_binary,
+    high_risk_probabilities
+)
+
+plt.title("SVM ROC Curve — Vehicle Service Risk")
+plt.show()
+```
 
 ---
 
