@@ -760,3 +760,1286 @@ Sentiment analysis
 Semantic similarity
 Business-rule integration
 ```
+
+
+# ============================================================
+# AUTOMOBILE SERVICE COMPLAINT INTELLIGENCE SYSTEM
+# ============================================================
+
+import json
+import re
+from pathlib import Path
+
+import joblib
+import numpy as np
+import pandas as pd
+import spacy
+
+from sentence_transformers import SentenceTransformer
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import classification_report
+from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.model_selection import train_test_split
+from sklearn.pipeline import Pipeline
+from transformers import pipeline
+
+
+# ============================================================
+# 1. CONFIGURATION
+# ============================================================
+
+RANDOM_STATE = 42
+DUPLICATE_THRESHOLD = 0.65
+
+OUTPUT_FOLDER = Path("outputs")
+ARTIFACT_FOLDER = Path("artifacts")
+
+OUTPUT_FOLDER.mkdir(exist_ok=True)
+ARTIFACT_FOLDER.mkdir(exist_ok=True)
+
+
+# ============================================================
+# 2. SYNTHETIC CATEGORY-TRAINING DATA
+# ============================================================
+
+training_data = [
+    # --------------------------------------------------------
+    # Engine Issue
+    # --------------------------------------------------------
+    (
+        "The engine loses power while driving on the highway.",
+        "Engine Issue"
+    ),
+    (
+        "The engine warning light appeared and the car stopped.",
+        "Engine Issue"
+    ),
+    (
+        "There is strong engine vibration while the vehicle is idle.",
+        "Engine Issue"
+    ),
+    (
+        "The engine overheats after driving for twenty minutes.",
+        "Engine Issue"
+    ),
+
+    # --------------------------------------------------------
+    # Brake System Issue
+    # --------------------------------------------------------
+    (
+        "The brake pedal became hard and the vehicle did not stop.",
+        "Brake System Issue"
+    ),
+    (
+        "The brakes stopped responding while driving.",
+        "Brake System Issue"
+    ),
+    (
+        "The braking distance has suddenly increased.",
+        "Brake System Issue"
+    ),
+    (
+        "The brake warning light is on and the pedal feels soft.",
+        "Brake System Issue"
+    ),
+
+    # --------------------------------------------------------
+    # Battery or EV Issue
+    # --------------------------------------------------------
+    (
+        "The electric vehicle battery range has reduced significantly.",
+        "Battery or EV Issue"
+    ),
+    (
+        "The car battery drains completely overnight.",
+        "Battery or EV Issue"
+    ),
+    (
+        "The vehicle does not start because the battery is weak.",
+        "Battery or EV Issue"
+    ),
+    (
+        "Charging stops after a few minutes at every charging station.",
+        "Battery or EV Issue"
+    ),
+
+    # --------------------------------------------------------
+    # Service Delay
+    # --------------------------------------------------------
+    (
+        "The service centre has not delivered my vehicle on time.",
+        "Service Delay"
+    ),
+    (
+        "My car has been in the workshop for fifteen days.",
+        "Service Delay"
+    ),
+    (
+        "The dealer keeps postponing the promised delivery date.",
+        "Service Delay"
+    ),
+    (
+        "The vehicle is ready but the service centre is not releasing it.",
+        "Service Delay"
+    ),
+
+    # --------------------------------------------------------
+    # Billing or Warranty Issue
+    # --------------------------------------------------------
+    (
+        "The service centre charged an incorrect amount.",
+        "Billing or Warranty Issue"
+    ),
+    (
+        "My warranty claim was rejected without an explanation.",
+        "Billing or Warranty Issue"
+    ),
+    (
+        "I was charged for a component covered under warranty.",
+        "Billing or Warranty Issue"
+    ),
+    (
+        "The final service bill contains additional labour charges.",
+        "Billing or Warranty Issue"
+    ),
+
+    # --------------------------------------------------------
+    # Infotainment Issue
+    # --------------------------------------------------------
+    (
+        "The infotainment screen keeps restarting.",
+        "Infotainment Issue"
+    ),
+    (
+        "The navigation system does not display the correct location.",
+        "Infotainment Issue"
+    ),
+    (
+        "Bluetooth disconnects every few minutes.",
+        "Infotainment Issue"
+    ),
+    (
+        "The touchscreen stopped responding after the software update.",
+        "Infotainment Issue"
+    ),
+
+    # --------------------------------------------------------
+    # Body Damage
+    # --------------------------------------------------------
+    (
+        "The service centre scratched the left door.",
+        "Body Damage"
+    ),
+    (
+        "I found a dent on the bumper after servicing.",
+        "Body Damage"
+    ),
+    (
+        "The vehicle paint was damaged inside the workshop.",
+        "Body Damage"
+    ),
+    (
+        "The side mirror was broken when the car was returned.",
+        "Body Damage"
+    ),
+
+    # --------------------------------------------------------
+    # Staff Behaviour
+    # --------------------------------------------------------
+    (
+        "The service advisor was rude and unhelpful.",
+        "Staff Behaviour"
+    ),
+    (
+        "The technician refused to explain the repair.",
+        "Staff Behaviour"
+    ),
+    (
+        "The workshop manager behaved badly with the customer.",
+        "Staff Behaviour"
+    ),
+    (
+        "The dealer staff ignored my repeated calls.",
+        "Staff Behaviour"
+    )
+]
+
+training_df = pd.DataFrame(
+    training_data,
+    columns=[
+        "complaint_text",
+        "category"
+    ]
+)
+
+
+# ============================================================
+# 3. COMPLAINTS TO BE ANALYSED
+# ============================================================
+
+complaints = [
+    {
+        "complaint_id": "V001",
+        "complaint_text": (
+            "My Tata Nexon suddenly lost power while driving on the "
+            "Mumbai-Pune Expressway. The engine warning light appeared, "
+            "and the vehicle stopped near Lonavala."
+        )
+    },
+    {
+        "complaint_id": "V002",
+        "complaint_text": (
+            "I submitted my Hyundai Creta at Sunrise Motors Pune on "
+            "15 June 2026, but the vehicle has still not been delivered. "
+            "Service ID SER-98754."
+        )
+    },
+    {
+        "complaint_id": "V003",
+        "complaint_text": (
+            "The brakes of my Mahindra XUV700 stopped responding for a "
+            "few seconds while driving at 80 km/h. "
+            "This is extremely dangerous."
+        )
+    },
+    {
+        "complaint_id": "V004",
+        "complaint_text": (
+            "The service centre charged ₹18,500 for replacing the "
+            "battery, although the vehicle is still under warranty."
+        )
+    },
+    {
+        "complaint_id": "V005",
+        "complaint_text": (
+            "My vehicle MH12AB4587 has visited the workshop three times "
+            "for the same engine-vibration problem, but the issue "
+            "remains unresolved."
+        )
+    },
+    {
+        "complaint_id": "V006",
+        "complaint_text": (
+            "The technician was rude and refused to explain why my "
+            "warranty claim was rejected."
+        )
+    },
+    {
+        "complaint_id": "V007",
+        "complaint_text": (
+            "After software update v4.2.1, the infotainment system keeps "
+            "restarting every five minutes."
+        )
+    },
+    {
+        "complaint_id": "V008",
+        "complaint_text": (
+            "I received my car after servicing, but the left door was "
+            "scratched and the fuel level had reduced significantly."
+        )
+    },
+    {
+        "complaint_id": "V009",
+        "complaint_text": (
+            "The electric vehicle battery range has dropped from "
+            "350 km to 210 km within six months."
+        )
+    },
+    {
+        "complaint_id": "V010",
+        "complaint_text": (
+            "Smoke started coming from the engine compartment immediately "
+            "after the scheduled service. Please arrange emergency assistance."
+        )
+    },
+    {
+        "complaint_id": "V011",
+        "complaint_text": (
+            "The engine shakes strongly whenever my vehicle remains idle. "
+            "The workshop has already inspected it three times."
+        )
+    }
+]
+
+complaint_df = pd.DataFrame(complaints)
+
+
+# ============================================================
+# 4. TEXT NORMALIZATION
+# ============================================================
+
+def normalize_text(text):
+    """
+    Standardizes punctuation and whitespace without removing
+    important entities or changing the original meaning.
+    """
+
+    text = str(text)
+
+    text = text.replace("–", "-")
+    text = text.replace("—", "-")
+    text = text.replace("’", "'")
+    text = text.replace("“", '"')
+    text = text.replace("”", '"')
+
+    text = re.sub(r"\s+", " ", text)
+
+    return text.strip()
+
+
+training_df["normalized_text"] = (
+    training_df["complaint_text"]
+    .apply(normalize_text)
+)
+
+complaint_df["normalized_text"] = (
+    complaint_df["complaint_text"]
+    .apply(normalize_text)
+)
+
+
+# ============================================================
+# 5. BUILD TF-IDF CATEGORY CLASSIFIER
+# ============================================================
+
+X = training_df["normalized_text"]
+y = training_df["category"]
+
+
+X_train, X_test, y_train, y_test = train_test_split(
+    X,
+    y,
+    test_size=0.25,
+    random_state=RANDOM_STATE,
+    stratify=y
+)
+
+
+category_model = Pipeline(
+    steps=[
+        (
+            "tfidf",
+            TfidfVectorizer(
+                lowercase=True,
+                ngram_range=(1, 2),
+                sublinear_tf=True
+            )
+        ),
+        (
+            "classifier",
+            LogisticRegression(
+                max_iter=2000,
+                class_weight="balanced",
+                random_state=RANDOM_STATE
+            )
+        )
+    ]
+)
+
+
+category_model.fit(
+    X_train,
+    y_train
+)
+
+
+test_predictions = category_model.predict(X_test)
+
+print("=" * 70)
+print("CATEGORY CLASSIFIER EVALUATION")
+print("=" * 70)
+
+print(
+    classification_report(
+        y_test,
+        test_predictions,
+        zero_division=0
+    )
+)
+
+
+# Retrain using the complete demonstration dataset
+category_model.fit(X, y)
+
+
+# Save the trained classification pipeline
+joblib.dump(
+    category_model,
+    ARTIFACT_FOLDER / "complaint_category_model.joblib"
+)
+
+
+# ============================================================
+# 6. LOAD SPACY NLP PIPELINE
+# ============================================================
+
+nlp = spacy.load("en_core_web_sm")
+
+
+# Add custom automobile entities
+entity_ruler = nlp.add_pipe(
+    "entity_ruler",
+    after="ner",
+    config={
+        "overwrite_ents": True
+    }
+)
+
+
+vehicle_brands = [
+    "Tata",
+    "Mahindra",
+    "Hyundai",
+    "Maruti Suzuki",
+    "Toyota",
+    "Honda",
+    "Kia",
+    "Volkswagen",
+    "Skoda",
+    "MG",
+    "Renault",
+    "Nissan"
+]
+
+
+vehicle_models = [
+    "Nexon",
+    "XUV700",
+    "Creta",
+    "Seltos",
+    "Harrier",
+    "Safari",
+    "Venue",
+    "Thar",
+    "Scorpio",
+    "Hector",
+    "Virtus",
+    "Kushaq"
+]
+
+
+vehicle_components = [
+    "engine",
+    "brake",
+    "brakes",
+    "battery",
+    "gearbox",
+    "transmission",
+    "infotainment system",
+    "touchscreen",
+    "door",
+    "bumper",
+    "fuel system",
+    "steering",
+    "airbag",
+    "suspension"
+]
+
+
+dealers = [
+    "Sunrise Motors Pune"
+]
+
+
+patterns = []
+
+
+for brand in vehicle_brands:
+    patterns.append({
+        "label": "VEHICLE_BRAND",
+        "pattern": brand
+    })
+
+
+for model in vehicle_models:
+    patterns.append({
+        "label": "VEHICLE_MODEL",
+        "pattern": model
+    })
+
+
+for component in vehicle_components:
+    patterns.append({
+        "label": "VEHICLE_COMPONENT",
+        "pattern": component
+    })
+
+
+for dealer in dealers:
+    patterns.append({
+        "label": "DEALER",
+        "pattern": dealer
+    })
+
+
+entity_ruler.add_patterns(patterns)
+
+
+# ============================================================
+# 7. REGEX PATTERNS FOR DOMAIN ENTITIES
+# ============================================================
+
+REGEX_PATTERNS = {
+    "REGISTRATION_NUMBER": re.compile(
+        r"\b[A-Z]{2}\s?\d{1,2}\s?[A-Z]{1,3}\s?\d{4}\b",
+        re.IGNORECASE
+    ),
+
+    "SERVICE_ID": re.compile(
+        r"\bSER-\d+\b",
+        re.IGNORECASE
+    ),
+
+    "DIAGNOSTIC_CODE": re.compile(
+        r"\b(?:DTC-?)?[A-Z]\d{4}\b",
+        re.IGNORECASE
+    ),
+
+    "SOFTWARE_VERSION": re.compile(
+        r"\bv\d+(?:\.\d+)+\b",
+        re.IGNORECASE
+    ),
+
+    "MONEY": re.compile(
+        r"₹\s?\d+(?:,\d{3})*(?:\.\d+)?"
+    ),
+
+    "SPEED": re.compile(
+        r"\b\d{1,3}\s*km/?h\b",
+        re.IGNORECASE
+    ),
+
+    "DISTANCE_OR_RANGE": re.compile(
+        r"\b\d+(?:,\d{3})?\s*km\b",
+        re.IGNORECASE
+    )
+}
+
+
+# ============================================================
+# 8. HELPER FUNCTIONS
+# ============================================================
+
+def unique_values(values):
+    """
+    Removes duplicates while retaining the original order.
+    """
+
+    return list(dict.fromkeys(values))
+
+
+def extract_entities(text, doc):
+    """
+    Combines spaCy named entities with automobile-specific
+    regular-expression entities.
+    """
+
+    entities = {}
+
+
+    # General and custom spaCy entities
+    for entity in doc.ents:
+
+        label = entity.label_
+        value = entity.text.strip()
+
+        entities.setdefault(label, [])
+        entities[label].append(value)
+
+
+    # Domain-specific regular expressions
+    for label, pattern in REGEX_PATTERNS.items():
+
+        matches = pattern.findall(text)
+
+        if matches:
+            entities.setdefault(label, [])
+            entities[label].extend(matches)
+
+
+    # Remove repeated values
+    for label in entities:
+        entities[label] = unique_values(
+            entities[label]
+        )
+
+
+    return entities
+
+
+def create_linguistic_analysis(doc):
+    """
+    Creates token, lemma and POS details for one complaint.
+    """
+
+    analysis = []
+
+    for token in doc:
+
+        if token.is_space:
+            continue
+
+        analysis.append({
+            "token": token.text,
+            "lemma": token.lemma_,
+            "pos": token.pos_,
+            "dependency": token.dep_,
+            "is_stopword": token.is_stop,
+            "is_punctuation": token.is_punct,
+            "entity_type": token.ent_type_
+        })
+
+    return analysis
+
+
+def extract_important_lemmas(doc):
+    """
+    Keeps content words and removes stop words and punctuation.
+    """
+
+    lemmas = []
+
+    for token in doc:
+
+        if token.is_space:
+            continue
+
+        if token.is_stop:
+            continue
+
+        if token.is_punct:
+            continue
+
+        lemma = token.lemma_.lower().strip()
+
+        if lemma:
+            lemmas.append(lemma)
+
+    return unique_values(lemmas)
+
+
+def determine_urgency(text, category):
+    """
+    Assigns urgency using safety expressions and category rules.
+    """
+
+    normalized = text.lower()
+
+
+    critical_phrases = [
+        "brakes stopped responding",
+        "brake failure",
+        "brakes failed",
+        "smoke started",
+        "caught fire",
+        "vehicle caught fire",
+        "airbag did not deploy",
+        "accident",
+        "extremely dangerous",
+        "emergency assistance",
+        "lost control"
+    ]
+
+
+    high_phrases = [
+        "lost power",
+        "vehicle stopped",
+        "engine stopped",
+        "overheating",
+        "same problem",
+        "three times",
+        "repeated breakdown",
+        "remains unresolved",
+        "battery overheating",
+        "warning light"
+    ]
+
+
+    if any(
+        phrase in normalized
+        for phrase in critical_phrases
+    ):
+        return "Critical"
+
+
+    if category == "Brake System Issue":
+        return "High"
+
+
+    if any(
+        phrase in normalized
+        for phrase in high_phrases
+    ):
+        return "High"
+
+
+    if category in {
+        "Engine Issue",
+        "Battery or EV Issue"
+    }:
+        return "High"
+
+
+    if category in {
+        "Service Delay",
+        "Billing or Warranty Issue",
+        "Body Damage",
+        "Staff Behaviour"
+    }:
+        return "Medium"
+
+
+    return "Low"
+
+
+def detect_safety_risk(text, category, urgency):
+    """
+    Flags potentially dangerous complaints.
+    """
+
+    safety_words = [
+        "brake",
+        "brakes",
+        "smoke",
+        "fire",
+        "dangerous",
+        "accident",
+        "overheating",
+        "lost control",
+        "airbag",
+        "emergency"
+    ]
+
+    normalized = text.lower()
+
+    return (
+        urgency == "Critical"
+        or (
+            category in {
+                "Brake System Issue",
+                "Engine Issue"
+            }
+            and any(
+                word in normalized
+                for word in safety_words
+            )
+        )
+    )
+
+
+CATEGORY_TO_ROOT_CAUSE = {
+    "Engine Issue": "Powertrain or engine management",
+    "Brake System Issue": "Braking system",
+    "Battery or EV Issue": "Battery, charging or electrical system",
+    "Service Delay": "Dealer or workshop operations",
+    "Billing or Warranty Issue": "Billing or warranty administration",
+    "Infotainment Issue": "Infotainment hardware or software",
+    "Body Damage": "Workshop handling or body repair",
+    "Staff Behaviour": "Customer service or employee conduct"
+}
+
+
+CATEGORY_TO_DEPARTMENT = {
+    "Engine Issue": "Powertrain Engineering",
+    "Brake System Issue": "Vehicle Safety Team",
+    "Battery or EV Issue": "Electrical and EV Systems",
+    "Service Delay": "Dealer Operations",
+    "Billing or Warranty Issue": "Warranty and Accounts",
+    "Infotainment Issue": "Connected Car and Infotainment",
+    "Body Damage": "Workshop Quality Team",
+    "Staff Behaviour": "Customer Experience Team"
+}
+
+
+def recommend_action(category, urgency):
+    """
+    Generates a controlled business recommendation.
+    """
+
+    if urgency == "Critical":
+        return (
+            "Contact the customer immediately, advise against driving "
+            "the vehicle and arrange emergency inspection or towing."
+        )
+
+
+    recommendations = {
+        "Engine Issue": (
+            "Schedule priority diagnostics and inspect engine fault codes."
+        ),
+
+        "Brake System Issue": (
+            "Arrange an immediate brake-system inspection and road-safety check."
+        ),
+
+        "Battery or EV Issue": (
+            "Perform battery-health, charging and electrical diagnostics."
+        ),
+
+        "Service Delay": (
+            "Contact the dealer and provide a confirmed delivery commitment."
+        ),
+
+        "Billing or Warranty Issue": (
+            "Audit the invoice and verify warranty eligibility."
+        ),
+
+        "Infotainment Issue": (
+            "Check software version, logs and available firmware updates."
+        ),
+
+        "Body Damage": (
+            "Inspect the vehicle, review workshop records and arrange repair."
+        ),
+
+        "Staff Behaviour": (
+            "Escalate the interaction to the customer-experience manager."
+        )
+    }
+
+
+    return recommendations.get(
+        category,
+        "Assign the complaint for manual review."
+    )
+
+
+# ============================================================
+# 9. PROCESS COMPLAINTS WITH SPACY
+# ============================================================
+
+texts = complaint_df["normalized_text"].tolist()
+
+
+# nlp.pipe processes the complaints as a batch
+processed_docs = list(
+    nlp.pipe(
+        texts,
+        batch_size=16
+    )
+)
+
+
+# ============================================================
+# 10. CATEGORY PREDICTIONS
+# ============================================================
+
+category_predictions = category_model.predict(texts)
+
+category_probabilities = (
+    category_model.predict_proba(texts)
+)
+
+category_confidence = (
+    category_probabilities.max(axis=1)
+)
+
+
+# ============================================================
+# 11. TRANSFORMER SENTIMENT ANALYSIS
+# ============================================================
+
+sentiment_analyzer = pipeline(
+    task="sentiment-analysis",
+    model=(
+        "distilbert-base-uncased-finetuned-sst-2-english"
+    )
+)
+
+
+raw_sentiments = sentiment_analyzer(
+    texts,
+    truncation=True,
+    batch_size=8
+)
+
+
+strong_negative_phrases = [
+    "extremely dangerous",
+    "smoke",
+    "fire",
+    "stopped responding",
+    "remains unresolved",
+    "emergency",
+    "rejected",
+    "rude"
+]
+
+
+def convert_sentiment(text, transformer_result):
+    """
+    Converts binary transformer sentiment into business labels.
+    """
+
+    label = transformer_result["label"].upper()
+    score = float(transformer_result["score"])
+
+    normalized = text.lower()
+
+
+    if "NEGATIVE" in label:
+
+        has_strong_negative_phrase = any(
+            phrase in normalized
+            for phrase in strong_negative_phrases
+        )
+
+        if has_strong_negative_phrase or score >= 0.98:
+            return "Highly Negative"
+
+        return "Negative"
+
+
+    if score >= 0.80:
+        return "Positive"
+
+    return "Neutral"
+
+
+# ============================================================
+# 12. SEMANTIC DUPLICATE DETECTION
+# ============================================================
+
+embedding_model = SentenceTransformer(
+    "sentence-transformers/all-MiniLM-L6-v2"
+)
+
+
+embeddings = embedding_model.encode(
+    texts,
+    normalize_embeddings=True,
+    show_progress_bar=False
+)
+
+
+similarity_matrix = cosine_similarity(
+    embeddings
+)
+
+
+# Prevent each record from matching itself
+np.fill_diagonal(
+    similarity_matrix,
+    -1
+)
+
+
+duplicate_ids = []
+duplicate_scores = []
+
+
+for row_index in range(len(complaint_df)):
+
+    best_match_index = int(
+        similarity_matrix[row_index].argmax()
+    )
+
+    best_score = float(
+        similarity_matrix[
+            row_index,
+            best_match_index
+        ]
+    )
+
+
+    if best_score >= DUPLICATE_THRESHOLD:
+
+        duplicate_ids.append(
+            complaint_df.iloc[
+                best_match_index
+            ]["complaint_id"]
+        )
+
+    else:
+        duplicate_ids.append(None)
+
+
+    duplicate_scores.append(
+        round(best_score, 4)
+    )
+
+
+# ============================================================
+# 13. BUILD FINAL REPORT
+# ============================================================
+
+report_rows = []
+token_rows = []
+
+
+for index, complaint in complaint_df.iterrows():
+
+    complaint_id = complaint["complaint_id"]
+    original_text = complaint["complaint_text"]
+    normalized_text = complaint["normalized_text"]
+
+    doc = processed_docs[index]
+
+    category = category_predictions[index]
+    confidence = float(
+        category_confidence[index]
+    )
+
+    sentiment = convert_sentiment(
+        normalized_text,
+        raw_sentiments[index]
+    )
+
+    urgency = determine_urgency(
+        normalized_text,
+        category
+    )
+
+    safety_risk = detect_safety_risk(
+        normalized_text,
+        category,
+        urgency
+    )
+
+    entities = extract_entities(
+        normalized_text,
+        doc
+    )
+
+    important_lemmas = extract_important_lemmas(
+        doc
+    )
+
+    sentences = [
+        sentence.text.strip()
+        for sentence in doc.sents
+    ]
+
+    department = CATEGORY_TO_DEPARTMENT.get(
+        category,
+        "Manual Review Team"
+    )
+
+    root_cause = CATEGORY_TO_ROOT_CAUSE.get(
+        category,
+        "Requires investigation"
+    )
+
+    action = recommend_action(
+        category,
+        urgency
+    )
+
+
+    report_rows.append({
+        "complaint_id": complaint_id,
+        "original_complaint": original_text,
+        "sentence_count": len(sentences),
+        "token_count": len([
+            token
+            for token in doc
+            if not token.is_space
+        ]),
+        "sentences": json.dumps(
+            sentences,
+            ensure_ascii=False
+        ),
+        "important_lemmas": json.dumps(
+            important_lemmas,
+            ensure_ascii=False
+        ),
+        "entities": json.dumps(
+            entities,
+            ensure_ascii=False
+        ),
+        "predicted_category": category,
+        "category_confidence": round(
+            confidence,
+            4
+        ),
+        "sentiment": sentiment,
+        "urgency": urgency,
+        "safety_risk": safety_risk,
+        "root_cause_area": root_cause,
+        "assigned_department": department,
+        "recommended_action": action,
+        "possible_duplicate_of": duplicate_ids[index],
+        "duplicate_similarity": duplicate_scores[index]
+    })
+
+
+    # Detailed token-level report
+    linguistic_analysis = create_linguistic_analysis(
+        doc
+    )
+
+    for token_record in linguistic_analysis:
+
+        token_rows.append({
+            "complaint_id": complaint_id,
+            **token_record
+        })
+
+
+report_df = pd.DataFrame(report_rows)
+
+token_analysis_df = pd.DataFrame(token_rows)
+
+
+# ============================================================
+# 14. BUILD DUPLICATE-PAIR REPORT
+# ============================================================
+
+duplicate_pairs = []
+
+
+for first_index in range(len(complaint_df)):
+
+    for second_index in range(
+        first_index + 1,
+        len(complaint_df)
+    ):
+
+        score = float(
+            similarity_matrix[
+                first_index,
+                second_index
+            ]
+        )
+
+        if score >= DUPLICATE_THRESHOLD:
+
+            duplicate_pairs.append({
+                "complaint_id_1": (
+                    complaint_df.iloc[
+                        first_index
+                    ]["complaint_id"]
+                ),
+                "complaint_id_2": (
+                    complaint_df.iloc[
+                        second_index
+                    ]["complaint_id"]
+                ),
+                "similarity_score": round(
+                    score,
+                    4
+                ),
+                "possible_duplicate": True
+            })
+
+
+duplicate_df = pd.DataFrame(
+    duplicate_pairs
+)
+
+
+# ============================================================
+# 15. SAVE OUTPUT FILES
+# ============================================================
+
+report_path = (
+    OUTPUT_FOLDER /
+    "automobile_complaint_nlp_report.csv"
+)
+
+token_path = (
+    OUTPUT_FOLDER /
+    "automobile_token_analysis.csv"
+)
+
+duplicate_path = (
+    OUTPUT_FOLDER /
+    "duplicate_complaint_report.csv"
+)
+
+
+report_df.to_csv(
+    report_path,
+    index=False,
+    encoding="utf-8-sig"
+)
+
+token_analysis_df.to_csv(
+    token_path,
+    index=False,
+    encoding="utf-8-sig"
+)
+
+duplicate_df.to_csv(
+    duplicate_path,
+    index=False,
+    encoding="utf-8-sig"
+)
+
+
+# ============================================================
+# 16. DISPLAY IMPORTANT RESULTS
+# ============================================================
+
+display_columns = [
+    "complaint_id",
+    "predicted_category",
+    "category_confidence",
+    "sentiment",
+    "urgency",
+    "safety_risk",
+    "assigned_department",
+    "possible_duplicate_of",
+    "duplicate_similarity"
+]
+
+
+print("\n" + "=" * 70)
+print("FINAL NLP COMPLAINT REPORT")
+print("=" * 70)
+
+print(
+    report_df[
+        display_columns
+    ].to_string(index=False)
+)
+
+
+print("\n" + "=" * 70)
+print("CRITICAL COMPLAINTS")
+print("=" * 70)
+
+critical_complaints = report_df[
+    report_df["urgency"] == "Critical"
+]
+
+if critical_complaints.empty:
+    print("No critical complaints found.")
+else:
+    print(
+        critical_complaints[
+            [
+                "complaint_id",
+                "original_complaint",
+                "predicted_category",
+                "recommended_action"
+            ]
+        ].to_string(index=False)
+    )
+
+
+print("\n" + "=" * 70)
+print("POSSIBLE DUPLICATES")
+print("=" * 70)
+
+if duplicate_df.empty:
+    print("No duplicate pairs crossed the threshold.")
+else:
+    print(
+        duplicate_df.to_string(
+            index=False
+        )
+    )
+
+
+print("\nFiles created:")
+
+print(report_path)
+print(token_path)
+print(duplicate_path)
+
+print(
+    ARTIFACT_FOLDER /
+    "complaint_category_model.joblib"
+)
